@@ -493,3 +493,113 @@ FROM
     provincias pr ON pr.provincia_id = po.provincia_id
 GROUP BY pr.nombre
 ORDER BY NUM_ADMISIONES DESC, PROVINCIA ASC;
+
+
+
+-- PLANTEAMOS LA ALERGIA MÁS COMÚN (RESOLVIENDO EL CASO DE EMPATE) - SUBCONSULTAS
+
+
+-- SUBCONSULTA 1: las veces que aparece una alergia - necesito identificarlas con un alias
+-- SUBCONSULTA 2: las máxima frecuencia de una alergia - - necesito identificarlas con un alias
+-- NOS QUEDAMOS CON LOS RESULTADOS DE LA SUBCONSULTA 1 CUYO NÚMERO DE VECES SEA IGUAL AL DATO EN LA SUBCONSULTA 2
+
+
+-- SUBCONSULTA 1: las veces que aparece una alergia - necesito identificarlas con un alias
+SELECT alergias.nombre, COUNT(*) AS cantidad
+FROM alergias
+JOIN pacientes_alergias ON alergias.alergias_id = pacientes_alergias.alergia_id
+GROUP BY alergias.nombre, pacientes_alergias.alergia_id;
+
+-- SUBCONSULTA 2: las máxima frecuencia de una alergia - - necesito identificarlas con un alias
+SELECT 
+    MAX(cantidad)
+FROM
+    (SELECT 
+        COUNT(*) AS cantidad
+    FROM
+        pacientes_alergias
+    GROUP BY alergia_id) AS subconsulta2;
+
+
+
+-- 
+SELECT 
+		alergia_id,
+        COUNT(*) AS cantidad
+    FROM
+        pacientes_alergias
+    GROUP BY alergia_id;
+
+
+SELECT 
+    nombre, cantidad
+FROM
+    (SELECT 
+        alergias.nombre, COUNT(*) AS cantidad
+    FROM
+        alergias
+    JOIN pacientes_alergias ON alergias.alergias_id = pacientes_alergias.alergia_id
+    GROUP BY alergias.nombre , pacientes_alergias.alergia_id) AS subonconsulta1
+WHERE
+    cantidad = (SELECT 
+            MAX(cantidad)
+        FROM
+            (SELECT 
+                COUNT(*) AS cantidad
+            FROM
+                pacientes_alergias
+            GROUP BY alergia_id) AS subconsulta2);
+
+-- misma solución anterior pero con CTE - Common Table Expressions - "CONSULTAS COMO TABLAS TEMPORALES"
+
+WITH conteo_alergias AS (
+	SELECT -- SUBCONSULTA 1: SABEMOS LA ALERGIA Y EL NÚMERO DE VECES QUE SE PADECE
+		a.nombre,
+		COUNT(*) AS cantidad
+	FROM pacientes_alergias pa
+    JOIN alergias a ON a.alergias_id = pa.alergia_id
+    GROUP BY a.nombre
+), cantidad_maxima AS ( -- SUBCONSULTA 2: SABER EL MÁXIMO DE VECES QUE APARECE UNA ALERGIA (LA QUE SEA)
+	SELECT MAX(cantidad) AS max_cantidad
+    FROM conteo_alergias
+)
+SELECT -- PARTE 3, FILTRO Y DIGO: QUÉDATE DE LA SUBCONSULTA 1 LOS REGISTROS (LAS ALAERGIAS)  QUE CUMPLAN LA SUBCONSULTA 2 (QUE APARECEN EL MÁXIMO DE VECES)
+	ca.nombre,
+    ca.cantidad
+FROM conteo_alergias
+JOIN cantidad_maxima cm ON cm.max_cantidad = ca.cantidad;
+
+
+-- qué paciente (id, noMbre y apellido) y los días que ha estado ingresado un paciente. Nos quedamos con el máximo
+-- 1 SIN CTES
+
+/**
+Jorge Dómine 11/06/2025 14:23 • datediff(COALESCE(ad.fecha_alta, curdate()), ad.fecha_admision)
+*/
+
+SELECT 
+    p.paciente_id,
+    p.nombre,
+    p.apellido,
+    SUM(DATEDIFF(IF(a.fecha_alta IS NOT NULL,
+                        a.fecha_alta,
+                        CURDATE()),
+                    a.fecha_admision)) AS dias_totales
+FROM
+    admisiones a
+        JOIN
+    pacientes p ON a.paciente_id = p.paciente_id
+GROUP BY p.paciente_id , p.nombre , p.apellido
+ORDER BY dias_totales DESC
+LIMIT 1; -- todo: MEJORAR EL CASO DE EMPATES (cts) Y probar la función COALESCE - para trabajo condicional con nulos
+    
+
+
+
+-- 2 CTES
+-- 1 saco el maximo de dias
+-- 2 saco los pacientes y su días
+-- 3 filtro los pacientes de 2, que cumplen el 1
+
+
+
