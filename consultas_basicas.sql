@@ -251,3 +251,245 @@ FROM
     pacientes_alergias pa ON p.paciente_id = pa.paciente_id
 		JOIN
 	alergias a ON pa.alergia_id = a.alergias_id;
+	
+-- NOMBRE DE LOS PACIENTES QUE TIENEN ALERGIA, USANDO UN RIGHT JOIN
+
+SELECT DISTINCT
+    p.nombre
+FROM
+    pacientes p -- tabla A
+        RIGHT JOIN
+    pacientes_alergias pa ON p.paciente_id = pa.paciente_id; -- tabla B
+    
+-- mostrar el número total de pacientes, de hombres y de mujeres (3 columnas), usando COUNT y SUM
+
+-- TODO ANALIZAR LA OPTIMALIDAD DE ESTA CONSULTA, COMPARADA CON LA SIGUENTE
+SELECT 
+  count(*) AS TOTAL_PACIENTES,
+  (SELECT COUNT(*) FROM pacientes WHERE genero = "M") AS TOTAL_HOMBRES,
+  (SELECT COUNT(*) FROM pacientes WHERE genero = "F") AS TOTAL_MUJERES
+FROM
+  pacientes;
+
+
+SELECT 
+  COUNT(*) AS total_pacientes,
+  SUM(CASE WHEN genero = 'M' THEN 1 ELSE 0 END)  AS total_pacientes,
+  SUM(CASE WHEN genero = 'F' THEN 1 ELSE 0 END) AS total_pacientes
+FROM
+  pacientes;
+  
+-- listado de alergias agrupado por el nombre y el número de pacinetes que la tienen
+
+-- 1 QUÉ DATOS ME PIDE
+-- 2 de qué tablas
+-- 3 los agrupo (SI HE COMBINADO f() agregación con un dato NO agregado)
+
+SELECT 
+    alergias.nombre, COUNT(*) AS num_pacientes
+FROM
+    pacientes_alergias
+        JOIN
+    alergias ON pacientes_alergias.alergia_id = alergias.alergias_id; -- sin el GROUP BY, no tiene sentido. Deshabilitado por defecto
+    
+SELECT 
+    alergias.nombre, COUNT(*) AS num_pacientes
+FROM
+    pacientes_alergias
+        JOIN
+    alergias ON pacientes_alergias.alergia_id = alergias.alergias_id
+GROUP BY alergias.nombre;
+    
+-- Error Code: 1140. In aggregated query without GROUP BY, expression #1 of SELECT list contains nonaggregated column 'hospital_kyndryl.alergias.nombre'; this is incompatible with sql_mode=only_full_group_by
+
+SELECT @@sql_mode;
+
+-- deshabilito la restrcción del GROUP BY al combinar datos agregados con no
+SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''));
+
+
+-- QUÉ PROVINCIAS (nombre) TENGO CON MÁS DE DOS PACIENTES
+-- 1 QUÉ DATOS
+-- 2 DE QUÉ TABLAS
+-- 3 CÓMO LOS AGRUPO
+-- 4 ORDENAR
+-- 5 FILTRO (HAVING/LIMIT)
+
+SELECT 
+    provincias.nombre, COUNT(*) AS num_pacientes
+FROM
+    provincias
+        JOIN
+    poblaciones ON provincias.provincia_id = poblaciones.poblacion_id
+        JOIN
+    pacientes ON pacientes.poblacion_id = poblaciones.poblacion_id
+GROUP BY provincias.nombre
+HAVING num_pacientes > 2;
+
+
+
+
+-- Dado un id de paciente (como parámetros) haced una consulta que me diga cuántas admisiones ha tenido ese paciente en el último mes
+-- PISTA_ COUNT, DATE_SUB (restar fechas) CURDATE (fecha actual)
+
+
+SET @idpaciente :=1;
+SELECT 
+    COUNT(*) AS ingresos_ultimo_mes
+FROM
+    admisiones
+WHERE
+    (admisiones.paciente_id = @idpaciente)
+        AND (admisiones.fecha_admision >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)); -- admision ultimo es si fecha admision >= fecha actual, menos 1 mes
+	
+-- Jorge Dómine 11/06/2025 10:36 • 
+
+SET @ID := 1;
+SELECT 
+    COUNT(fecha_admision) AS ingresos_ultimo_mes_to_days
+FROM
+    admisiones a
+WHERE
+    a.paciente_id = @ID
+        AND TO_DAYS(CURDATE()) - TO_DAYS(fecha_admision) <= 30; -- ojo que estamos entendiendo 1 mes como 30 días
+        
+SELECT (CURDATE() - '2024-05-20');
+
+-- mostrar el id, la altura y peso de un paciente, informando además si tiene sobrepeso con un flag/booleano 0-1
+-- entendmos que alguien tiene sobrepeso si su IMC es >= 25 índice de masa coporal = PESO (kg) / ALTURA(m) * ALTURA(m)
+-- DATO AGREGADO
+
+SELECT 
+    paciente_id, 
+    altura, 
+    peso,
+	(peso / (POWER(altura, 2))) >= 25 AS sobrepeso
+FROM
+    pacientes;
+    
+SELECT 
+    paciente_id,
+    altura,
+    peso,
+    (CASE
+        WHEN (peso / POWER(altura, 2) >= 25) THEN 1
+        ELSE 0
+    END) AS sobrepeso
+FROM
+    pacientes
+ORDER BY sobrepeso DESC; -- me salen primero los de sobrepeso = 1 -- ASC;
+
+
+SELECT 
+    paciente_id,
+    altura,
+    peso,
+    IF(peso / POWER(altura, 2) >= 25, 'SÍ', 'NO') AS sobrepeso
+FROM
+    pacientes
+ORDER BY sobrepeso DESC; -- me salen primero los de sobrepeso = 1 -- ASC;
+
+/** listar los pacientes agrupados en el rango de peso de en 10 en 10 y de menor a mayor
+ P EJ: 3 pacientes 50 kg (50-59)
+       5 pacientes 60 kg (60-69)
+       ...
+**/
+
+-- Jorge Dómine 11/06/2025 12:18 • 
+SELECT 
+    COUNT(*),
+    CASE
+        WHEN p.peso < 50 THEN '1 MENOR DE 50Kg'
+        WHEN p.peso >= 50 AND p.peso < 60 THEN '2 ENTRE 50Kg y 60Kg'
+        WHEN p.peso >= 60 AND p.peso < 70 THEN '3 ENTRE 60Kg y 70Kg'
+        WHEN p.peso >= 70 AND p.peso < 80 THEN '4 ENTRE 70Kg y 80Kg'
+        WHEN p.peso >= 80 AND p.peso < 90 THEN '5 ENTRE 80Kg y 90Kg'
+        ELSE '6 MAYOR DE 90Kg'
+    END AS GRUPO
+FROM
+    pacientes p
+GROUP BY GRUPO
+ORDER BY GRUPO;
+
+-- Victor Manuel Martin Rodriguez 11/06/2025 12:23 • 
+SELECT 
+  paciente_id, 
+  nombre, 
+  altura, 
+  peso,
+  CASE
+WHEN peso BETWEEN 50 AND 59 THEN '50-59'
+WHEN peso BETWEEN 60 AND 69 THEN '60-69'
+WHEN peso BETWEEN 70 AND 80 THEN '70-80'
+    ELSE 'Otro'
+  END AS rango_peso
+FROM pacientes
+WHERE peso BETWEEN 50 AND 80
+ORDER BY peso ASC;
+
+
+-- Pablo Muñoz Medina 11/06/2025 12:17 • 
+SELECT 
+	COUNT(*) AS total_pacientes,
+    FLOOR(p.peso / 10) * 10 AS rango_peso -- hace que todos los pacientes de la misma decena, se queden el mismo grupo 5X -> 50 / 6X -> 60, etc
+FROM
+    pacientes p
+GROUP BY rango_peso
+ORDER BY rango_peso;
+
+
+/**
+-- 1 QUÉ DATOS
+-- 2 DE QUÉ TABLAS - JOIN
+-- 3 CÓMO LOS AGRUPO
+-- 4 ORDENAR
+-- 5 FILTRO (HAVING/LIMIT)*/
+
+-- BASÁNDONOS EN ESTA CONSULTA: las alerigas, agrupadas por su frecuencia de aparición
+-- SACAMOS LA ALERGIA MÁS COMÚN
+
+SELECT 
+    alergias.nombre, COUNT(*) AS num_pacientes
+FROM
+    pacientes_alergias
+        JOIN
+    alergias ON pacientes_alergias.alergia_id = alergias.alergias_id
+GROUP BY alergias.nombre
+ORDER BY num_pacientes DESC
+LIMIT 1;
+
+-- ALERGIA MENOS COMÚN
+
+SELECT 
+    alergias.nombre, COUNT(*) AS num_pacientes
+FROM
+    pacientes_alergias
+        JOIN
+    alergias ON pacientes_alergias.alergia_id = alergias.alergias_id
+GROUP BY alergias.nombre
+ORDER BY num_pacientes ASC
+LIMIT 1; -- funciona pero en caso de empate, me da solo el primero / el mayor o el menor
+
+-- EL NÚMERO DE ADMISIONES POR PROVINCIA, ORDENADOR POR EL NÚMERO DE ADMISIONES y el NOMBRE DE LA PROVINCIA
+/*
+1) QUÉ DATOS QUIERO (AGREGADOS)
+2) DE QUÉ TABLAS (JOINS)
+3) CÓMO AGRUPO
+4) CÓMO ORDENO
+5) FILTRO (no aplica)
+*/
+
+-- Jorge Dómine 11/06/2025 12:48 • 
+SELECT 
+    pr.nombre AS PROVINCIA, 
+    COUNT(*) AS NUM_ADMISIONES
+FROM
+    admisiones ad
+        JOIN
+    pacientes pa ON pa.paciente_id = ad.paciente_id
+        JOIN
+    poblaciones po ON po.poblacion_id = pa.poblacion_id
+        JOIN
+    provincias pr ON pr.provincia_id = po.provincia_id
+GROUP BY pr.nombre
+ORDER BY NUM_ADMISIONES DESC, PROVINCIA ASC;
