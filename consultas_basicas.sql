@@ -595,11 +595,38 @@ LIMIT 1; -- todo: MEJORAR EL CASO DE EMPATES (cts) Y probar la función COALESCE
     
 
 
-
 -- 2 CTES
 -- 1 saco el maximo de dias
 -- 2 saco los pacientes y su días
 -- 3 filtro los pacientes de 2, que cumplen el 1
 
+WITH dias_por_paciente AS (
+SELECT 
+    p.paciente_id,
+    p.nombre,
+    p.apellido,
+    SUM(DATEDIFF(IF(a.fecha_alta IS NOT NULL,
+                        a.fecha_alta,
+                        CURDATE()),
+                    a.fecha_admision)) AS dias_totales
+ FROM admisiones a
+JOIN
+ pacientes p ON a.paciente_id = p.paciente_id
+ GROUP BY
+	p.paciente_id, p.nombre, p.apellido
+), maximo AS (
+SELECT MAX(dias_totales) AS max_dias FROM dias_por_paciente
+)
+SELECT
+	d.paciente_id,
+    d.nombre,
+    d.apellido,
+    d.dias_totales
+FROM dias_por_paciente d
+JOIN maximo m ON d.dias_totales = m.max_dias;
+
+-- alternativa a la última parte
+-- FROM dias_por_paciente d ,  maximo m
+-- WHERE  d.dias_totales = m.max_dias;
 
 
