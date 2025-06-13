@@ -426,6 +426,97 @@ SELECT @mensaje;
 
 
 
+EXPLAIN ANALYZE SELECT 
+    COUNT(*) AS num_pacientes_grupo,
+    FLOOR(peso / 10) * 10 AS grupo_peso -- CUANDO TENGO un índice que se usa dentro de una f(), Mysql no lo usa
+FROM
+    pacientes
+GROUP BY grupo_peso;
+
+-- 1) OPTIMIZO, PRECALCUPAR EL GRUPO_PESO . add un columna EXTRA, dato agregado
+
+ALTER TABLE pacientes ADD COLUMN grupo_peso INT GENERATED ALWAYS AS (FLOOR(peso / 10) * 10) STORED;
+
+-- 2) CREAR UN ÍNDICE SOBRE ESE DATO AGREGADO
+
+CREATE INDEX idx_grupo_peso ON pacientes(grupo_peso);
+
+-- 3) REFORMULAR LA CONSULTA
+
+SELECT 
+    COUNT(*) AS num_pacientes_grupo, grupo_peso -- CUANDO TENGO un índice que se usa dentro de una f(), Mysql no lo usa
+FROM
+    pacientes
+GROUP BY grupo_peso;
+
+
+
+EXPLAIN ANALYZE SELECT 
+    COUNT(*) AS num_pacientes_grupo, grupo_peso -- CUANDO TENGO un índice que se usa dentro de una f(), Mysql no lo usa
+FROM
+    pacientes
+GROUP BY grupo_peso;
+
+
+EXPLAIN SELECT 
+    COUNT(*) AS num_pacientes_grupo,
+    FLOOR(peso / 10) * 10 AS grupo_peso
+FROM
+    pacientes
+GROUP BY grupo_peso;
+
+
+
+-- OPTIMIZACIÓN "ALERGIA MÁS CÓMUN"
+
+SELECT 
+    alergias.nombre, 
+    COUNT(*) AS num_pacientes
+FROM
+    pacientes_alergias
+JOIN
+    alergias ON pacientes_alergias.alergia_id = alergias.alergias_id
+GROUP BY 
+    alergias.nombre
+ORDER BY 
+    num_pacientes DESC
+LIMIT 1;
+
+
+
+EXPLAIN SELECT 
+    alergias.nombre, 
+    COUNT(*) AS num_pacientes
+FROM
+    pacientes_alergias
+JOIN
+    alergias ON pacientes_alergias.alergia_id = alergias.alergias_id
+GROUP BY 
+     alergias.nombre
+ORDER BY 
+    num_pacientes DESC
+LIMIT 1;
+
+-- 1 OPTIMIZO UN POCO SI AGRURPO POR LA Pk
+-- AGRUPAR EN SUBONSULTAS - 1º AGRUPO Y 2 ORDENO
+
+
+
+EXPLAIN SELECT nombre, num_pacientes
+FROM (
+    SELECT 
+        a.alergias_id,
+        a.nombre, 
+        COUNT(*) AS num_pacientes
+    FROM pacientes_alergias pa
+    JOIN alergias a ON pa.alergia_id = a.alergias_id
+    GROUP BY a.alergias_id, a.nombre -- 1 agrupa
+) AS sub
+ORDER BY num_pacientes DESC -- 2 ordena
+LIMIT 1;
+
+
+
 
 
 
