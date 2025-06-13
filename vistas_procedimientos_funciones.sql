@@ -220,3 +220,216 @@ END $$
 DELIMITER ;
 
 SELECT nombre, convertir_peso_a_notacion_coma(peso) FROM pacientes;
+
+
+DELIMITER $$
+
+CREATE FUNCTION convertir_peso_a_notacion_coma_cast (peso DECIMAL(4,1))
+RETURNS VARCHAR(5) -- indicamos el tipo devuelto
+DETERMINISTIC -- indicamos el comportamiento: ante un mismo valor de entrada, el valor de salida es igual
+CONTAINS SQL -- usamos sql PERO no accedemos a tablas
+BEGIN
+	    DECLARE peso_convertido VARCHAR(5);
+		-- SET peso_convertido = REPLACE(CONCAT(peso, ''), '.', ',');
+        SET peso_convertido = REPLACE(CAST(peso AS CHAR), '.', ',');
+        RETURN peso_convertido;
+END $$
+
+DELIMITER ;
+
+SELECT nombre, convertir_peso_a_notacion_coma_cast (peso) FROM pacientes;
+
+
+/**
+DISPARADORES
+*/
+
+DELIMITER $$
+CREATE TRIGGER trg_calcular_imc
+AFTER INSERT ON pacientes -- evento bajo el que se dispara esta función
+FOR EACH ROW
+BEGIN
+	DECLARE imc_val DECIMAL(5,2);
+    -- calculo = peso / altura * altura
+    -- validación peso y altura no sean null ni cero
+    IF NEW.peso IS NOT NULL AND NEW.altura IS NOT NULL AND NEW.altura >0 THEN
+		SET imc_val = NEW.peso / (NEW.altura*NEW.altura);
+	ELSE
+		SET imc_val = NULL;
+	END IF;
+    
+	IF imc_val IS NOT NULL THEN
+		INSERT INTO imc_pacientes(paciente_id, imc)
+        VALUES (NEW.paciente_id, imc_val);
+	END IF;
+
+END $$
+DELIMITER ;
+
+INSERT INTO pacientes (nombre, apellido, peso, altura) VALUES ('Juan', 'Pérez', 75, 1.70);
+
+-- REGISTRAMOS OTRO DISPARADOR CUANDO SE ACTUALICE UN PACIENTE, QUE SE ACTUALICE TAMBIÉN SU IMC
+
+DELIMITER $$
+CREATE TRIGGER trg_actualizar_imc
+AFTER UPDATE ON pacientes -- evento bajo el que se dispara esta función
+FOR EACH ROW
+BEGIN
+	
+    DECLARE imc_val DECIMAL(5,2);
+	
+    IF (NEW.peso <> OLD.peso OR NEW.altura <> OLD.altura)
+    AND (NEW.peso IS NOT NULL AND NEW.altura IS NOT NULL AND NEW.altura >0)
+    THEN
+    	SET imc_val = NEW.peso / (NEW.altura*NEW.altura);
+        
+        -- ACTUALIZAMOS EL IMC_PACIENTES
+        UPDATE imc_pacientes
+        SET imc = imc_val, fecha_registro= CURRENT_TIMESTAMP 
+        WHERE paciente_id = NEW.paciente_id;
+        
+        -- el update anterior, puede no tener efecto, por se un paciente modificado, que no contaba con cálculo de imc
+        -- esto ocurre si el disparador se definió después de crear la tabla pacientes
+        IF ROW_COUNT()=0 THEN -- debemos insertar el registros en imc_pacientes por el ser el primero
+			INSERT INTO imc_pacientes (paciente_id, imc)
+            VALUES (NEW.paciente_id, imc_val);
+		END IF; -- SI INSERT EN VEZ DE UPDATE IMC_PACIENTES
+	END IF; -- SI DATOS CORRECTOS O NUEVOS
+		
+    
+END $$
+DELIMITER ;
+
+UPDATE pacientes 
+SET peso = 80
+WHERE paciente_id = 11;
+
+-- ESCRIBIR OTRO DISPARADOR PARA QUE CUANDO SE BORRE UN PACIENTE, SE BORRE TAMBIÉN SU REGISTRO EN IMC_PACIENTES
+
+
+DELIMITER $$
+CREATE TRIGGER trg_eliminar_imc
+BEFORE DELETE ON pacientes -- evento bajo el que se dispara esta función
+FOR EACH ROW
+BEGIN
+	DELETE FROM imc_pacientes WHERE paciente_id = OLD.paciente_id;
+END $$
+DELIMITER ;
+
+DELETE FROM pacientes WHERE paciente_id = 11;
+
+
+
+-- TODO. hacemos un procedimiento para insertar una admisión (SUPONEMOS QUE EL PACIENTE EXISTE)
+
+
+
+DELIMITER $$
+CREATE PROCEDURE insertar_admision (IN p_diagnostico VARCHAR(50), IN id_paciente INT, IN id_doctor INT)
+BEGIN
+	INSERT INTO admisiones (fecha_admision, fecha_alta, diagnostico, paciente_id, doctor_id)
+    VALUES (NOW(), NULL, p_diagnostico, id_paciente, id_doctor);
+END $$
+DELIMITER ;
+
+call insertar_admision ('En observación', 1, 1);
+
+-- VAMOS A HACER UN DISPARADOR, PARA VERIFICAR UNA NORMA DE NEGOCIO: A UN DOCTOR NO LE PODEMOS ASIGNAR MÁS DE DOS PACIENTES EN UN DÍA
+
+DELIMITER $$
+CREATE TRIGGER trg_limitar_asignaciones_doctor
+BEFORE INSERT ON admisiones -- evento bajo el que se dispara esta función
+FOR EACH ROW
+BEGIN
+	
+    DECLARE num_admisiones_doctor INT;
+    -- contabilzamos el número de admisiones en la fecha de admsión (hoy) para ese NEW.doctorid, hoy
+    IF NEW.doctor_id IS NOT NULL THEN
+		SELECT COUNT(*) INTO num_admisiones_doctor
+		FROM admisiones
+		WHERE doctor_id = NEW.doctor_id
+		AND DATE(fecha_admision) = DATE(NEW.fecha_admision);
+        
+    -- si esas admisiones, son >= 2 "lanzamos una excepción" - emitr una señal 
+		IF (num_admisiones_doctor >= 2) THEN
+			SIGNAL SQLSTATE '45000' -- UN CÓDIGO DE ERROR PROPIO
+            SET MESSAGE_TEXT = 'Error. El doctor ya tiene asignados a 2 pacientes en esa fecha';
+		END IF;
+	END IF;
+    
+END $$
+DELIMITER ;
+
+call insertar_admision ('En observación', 2, 1);
+
+call insertar_admision ('En observación', 3, 1); -- debería saltar el fallo por la comprobación de negocio en el disparador
+-- Error Code: 1644. Error. El doctor ya tiene asignados a 2 pacientes en esa fecha
+
+-- todo GESTIONAR TRANASCCIÓN EN MÉTODO INSERTAR_ADMISIÓN 
+
+SET autocommit = 1; -- modo por defecto 
+
+SET autocommit = 0; -- DESACTIVO la confirmación automática, gestionar la transacción TX
+START TRANSACTION;
+INSERT INTO pacientes (nombre, apellido, peso, altura) VALUES ('Juan', 'Pérez', 75, 1.70);
+INSERT INTO pacientes (nombre, apellido, peso, altura) VALUES ('Juan', 'Pérez', 75, 1.70);
+INSERT INTO pacientes (nombre, apellido, peso, altura) VALUES ('Juan', 'Pérez', 75, 1.70);
+ROLLBACK;  -- DESHAGO todas las operaciones desde el inicio de la TX
+-- COMMIT; -- guardo los datos de verdad
+
+
+
+DELIMITER $$
+CREATE PROCEDURE insertar_admision_tx (IN p_diagnostico VARCHAR(50), IN id_paciente INT, IN id_doctor INT, OUT mensaje_salida VARCHAR(255))
+BEGIN
+	
+    DECLARE codigo_error INT DEFAULT 0;
+    DECLARE vsqlstate CHAR(5) DEFAULT '00000';
+    DECLARE mensaje_error VARCHAR(255) DEFAULT '';
+
+    -- SECCIÓN DE CAPTURA/TRATAMIENTO ERROR/EXCEPCIÓN
+	DECLARE EXIT HANDLER FOR SQLEXCEPTION
+	BEGIN
+		
+        GET DIAGNOSTICS CONDITION 1 -- obtengo información sobre el último error registrado (2, penúlitmo 3, ante..)
+			codigo_error = MYSQL_ERRNO, -- COD error bd
+            vsqlstate = RETURNED_SQLSTATE, -- MENASAJE propio
+            mensaje_error = MESSAGE_TEXT; -- COD propio
+            
+            SET mensaje_salida = CONCAT('ERROR ', codigo_error, ' ' , mensaje_error, ' ' , vsqlstate); 
+    
+		ROLLBACK;
+	END;
+	
+    START TRANSACTION; -- desactiva el autocommit 
+
+	INSERT INTO admisiones (fecha_admision, fecha_alta, diagnostico, paciente_id, doctor_id)
+    VALUES (NOW(), NULL, p_diagnostico, id_paciente, id_doctor);
+    
+    SET mensaje_salida = 'Inserción exitosa :)';
+    
+    COMMIT; -- CONFIRMO todas las modificaciones desde START tx
+END $$
+DELIMITER ;
+
+
+
+SET @mensaje = '';
+call insertar_admision_tx ('En observación', 2, 4, @mensaje);
+SELECT @mensaje;
+
+
+SET @mensaje = '';
+call insertar_admision_tx ('En observación', 2, 1, @mensaje);
+SELECT @mensaje;
+
+
+
+
+
+
+
+
+
+
+
